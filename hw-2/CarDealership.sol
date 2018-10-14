@@ -11,7 +11,21 @@ contract CarDealership is Ownable {
         address owner;
     }
 
-    mapping(uint256 => Car) public cars;
+    /**
+     * Maps a car hash to a car. The hash is calculated off car make and model. 
+     */
+    mapping(uint => Car) private cars;
+    
+    /**
+     *  Maps an address to a list of owned car hashes.
+     */
+    mapping(address => Car[]) public ownerCars;
+    
+    /**
+     *  Maps a car hash to an index within the ownerCars array.
+     *  Used to optimize cost and avoid looping through the array. 
+     */
+    mapping(uint => uint) private ownerCarsIndex;
     
     event CarOwnershipUpdate(string make, string model, address oldOwner, address newOwner);
     event CarPriceUpdate(string make, string model, uint oldPrice, uint newPrice);
@@ -38,24 +52,6 @@ contract CarDealership is Ownable {
         transferProfit(oldOwner, car.price);
     }
     
-    function updateCarOwner(Car storage car, address newOwner) private {
-        address oldOwner = car.owner;
-        car.owner = newOwner;
-        emit CarOwnershipUpdate(car.make, car.model, oldOwner, newOwner);
-    }
-    
-    function updateCarPrice(Car storage car, uint newPrice) private {
-        uint oldPrice = car.price;
-        car.price = newPrice;
-        emit CarPriceUpdate(car.make, car.model, oldPrice, newPrice);
-    }
-    
-    function transferProfit(address oldOwner, uint price) private {
-        uint profit = calcOwnerProfit(price);
-        oldOwner.transfer(profit);
-        emit PaymentTransfer(oldOwner, profit);
-    }
-    
     function getCarDetails(string make, string model) public view returns (address, uint) {
         uint key = hash(make, model);
         Car storage car = cars[key];
@@ -71,6 +67,28 @@ contract CarDealership is Ownable {
         emit CommissionWithdrawal(owner, commissionsAmount);
     }
     
+    function updateCarOwner(Car storage car, address newOwner) private {
+        address oldOwner = car.owner;
+        car.owner = newOwner;
+        
+        uint key = hash(car.make, car.model);
+        removeCarFromOldOwner(key, oldOwner);
+        addCarToNewOwner(car, key, newOwner);
+        emit CarOwnershipUpdate(car.make, car.model, oldOwner, newOwner);
+    }
+    
+    function updateCarPrice(Car storage car, uint newPrice) private {
+        uint oldPrice = car.price;
+        car.price = newPrice;
+        emit CarPriceUpdate(car.make, car.model, oldPrice, newPrice);
+    }
+    
+    function transferProfit(address oldOwner, uint price) private {
+        uint profit = calcOwnerProfit(price);
+        oldOwner.transfer(profit);
+        emit PaymentTransfer(oldOwner, profit);
+    }
+    
     function calcMinNewPrice(uint oldPrice) private pure returns (uint) {
         return oldPrice * 2;
     }
@@ -83,10 +101,30 @@ contract CarDealership is Ownable {
         Car memory newCar = Car(make, model, price, owner);
         uint key = hash(make, model);
         cars[key] = newCar;
+        
+        addCarToNewOwner(cars[key], key, owner);
+    }
+    
+    function addCarToNewOwner(Car storage car, uint key, address newOwner) private {
+        ownerCars[newOwner].push(car);
+        ownerCarsIndex[key] = ownerCars[newOwner].length-1;
+    }
+    
+    function removeCarFromOldOwner(uint key, address oldOwner) private {
+        Car[] storage oldOwnerCars = ownerCars[oldOwner];
+        uint index = ownerCarsIndex[key];
+        
+        if (index == 0) return;
+        
+        if (oldOwnerCars.length > 1) {
+            oldOwnerCars[index] = oldOwnerCars[oldOwnerCars.length-1];
+            delete(oldOwnerCars[oldOwnerCars.length-1]); // recover gas
+        }
+        oldOwnerCars.length--;
     }
     
     function hash(string make, string model) private pure returns (uint) {
-        return uint(keccak256(abi.encodePacked(make, model)));
+        return uint(keccak256(abi.encodePacked(make, " ", model)));
     }
     
     modifier onlyPositive (uint price) {
