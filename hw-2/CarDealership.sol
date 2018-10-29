@@ -19,7 +19,7 @@ contract CarDealership is Ownable {
     /**
      *  Maps an address to a list of owned car hashes.
      */
-    mapping(address => Car[]) public ownerCars;
+    mapping(address => Car[]) private ownerCars;
     
     /**
      *  Maps a car hash to an index within the ownerCars array.
@@ -34,8 +34,8 @@ contract CarDealership is Ownable {
     
     constructor() public {
         addCar("VW", "Passat", 1 ether, owner);
-        addCar("BMW", "330i", 4 ether, owner);
-        addCar("Mercedes", "S650", 8 ether, owner);
+        addCar("BMW", "330i", 2 ether, owner);
+        addCar("Mercedes", "S650", 4 ether, owner);
     }
     
     function buyCar(string make, string model) public payable onlyPositive(msg.value) {
@@ -65,6 +65,15 @@ contract CarDealership is Ownable {
 
         owner.transfer(commissionsAmount);
         emit CommissionWithdrawal(owner, commissionsAmount);
+    }
+    
+    function getNumberOfCars(address owner) public view returns (uint) {
+        return ownerCars[owner].length;
+    }
+
+    function getCar(address owner, uint index) public view returns (string, string, uint) {
+        Car storage car = ownerCars[owner][index];
+        return (car.make, car.model, car.price);
     }
     
     function updateCarOwner(Car storage car, address newOwner) private {
@@ -112,14 +121,18 @@ contract CarDealership is Ownable {
     
     function removeCarFromOldOwner(uint key, address oldOwner) private {
         Car[] storage oldOwnerCars = ownerCars[oldOwner];
+        uint numOfOldOwnerCars = oldOwnerCars.length;
         uint index = ownerCarsIndex[key];
         
-        if (index == 0) return;
-        
-        if (oldOwnerCars.length > 1) {
-            oldOwnerCars[index] = oldOwnerCars[oldOwnerCars.length-1];
-            delete(oldOwnerCars[oldOwnerCars.length-1]); // recover gas
+        require(index < oldOwnerCars.length, "Invalid car index");
+        if (numOfOldOwnerCars > 1) {
+            oldOwnerCars[index] = oldOwnerCars[numOfOldOwnerCars-1];
+            // Update moved car index
+            Car storage movedCar = oldOwnerCars[index];
+            uint movedCarKey = hash(movedCar.make, movedCar.model);
+            ownerCarsIndex[movedCarKey] = index;
         }
+        delete oldOwnerCars[numOfOldOwnerCars-1];
         oldOwnerCars.length--;
     }
     
@@ -132,3 +145,5 @@ contract CarDealership is Ownable {
         _;
     }
 }
+
+
